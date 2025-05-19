@@ -1,0 +1,9 @@
+# requirements.txt
+streamlit
+python-dotenv
+crewai
+tavily-python
+scrapegraph-py
+google-generativeai
+protobuf
+agentops
