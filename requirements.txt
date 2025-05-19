@@ -1,11 +1,8 @@
-# requirements.txt
 pysqlite3
 pysqlite3-binary
-streamlit
-python-dotenv
-crewai
-tavily-python
-scrapegraph-py
-google-generativeai
-protobuf
-agentops
+streamlit>=1.45
+crewai==0.120.1
+tavily-python==0.7.2
+scrapegraph-py==1.12.0
+google-generativeai==0.8.5
+protobuf==5.29.4
