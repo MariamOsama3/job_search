@@ -11,6 +11,12 @@ import google.generativeai as genai
 from pydantic import BaseModel, Field
 from typing import List
 
+required_secrets = ["GEMINI_API_KEY", "TAVILY_API_KEY", "SCRAPEGRAPH_API_KEY"]
+missing = [key for key in required_secrets if key not in st.secrets]
+
+if missing:
+    st.error(f"❌ Missing secrets: {', '.join(missing)}")
+    st.stop()
 # Configure Gemini AI
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 llm = genai.GenerativeModel('gemini-1.5-flash')
