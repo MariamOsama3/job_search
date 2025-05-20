@@ -92,15 +92,6 @@ class WebScrapingTool(BaseTool):
         client = Client(api_key=scrapegraph_key)
         return client.smartscraper(website_url=url)
 
-# Continue with Main action
-class SearchRecommendation(BaseModel):(BaseTool):
-    name: str = "ScrapeGraph"
-    description: str = "Extracts page details using ScrapeGraph"
-
-    def run(self, url: str):
-        client = Client(api_key=scrapegraph_key)
-        return client.smartscraper(website_url=url)
-
 # Main action
 def start_job_search():
     # Ensure Gemini is configured
