@@ -15,23 +15,11 @@ from pydantic import BaseModel, Field
 from typing import List
 from langchain_google_genai import GoogleGenerativeAI
 
-# 1. Configure API keys with proper error handling
+# 1. Configure API keys
 st.sidebar.title("🔑 Enter API Keys")
-gemini_key = st.sidebar.text_input(
-    "Gemini API Key", 
-    type="password",
-    key="gemini_api_key"
-)
-tavily_key = st.sidebar.text_input(
-    "Tavily API Key", 
-    type="password",
-    key="tavily_api_key"
-)
-scrapegraph_key = st.sidebar.text_input(
-    "ScrapeGraph API Key", 
-    type="password",
-    key="scrapegraph_api_key"
-)
+gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
+tavily_key = st.sidebar.text_input("Tavily API Key", type="password")
+scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password")
 
 if not all([gemini_key, tavily_key, scrapegraph_key]):
     st.sidebar.error("Please provide all three API keys to continue.")
@@ -41,19 +29,19 @@ try:
     llm = GoogleGenerativeAI(
         model="gemini-1.5-flash",
         google_api_key=gemini_key,
-        request_timeout=120  # Added timeout
+        request_timeout=120
     )
 except Exception as e:
     st.error(f"Failed to initialize Gemini: {str(e)}")
     st.stop()
 
-# 2. Define enhanced Pydantic models
+# 2. Pydantic models
 class SearchRecommendation(BaseModel):
-    search_queries: List[str] = Field(..., title="Recommended searches", min_items=3, max_items=8)
+    search_queries: List[str] = Field(..., min_items=3, max_items=8)
 
 class SingleSearchResult(BaseModel):
     title: str
-    url: str = Field(..., title="Page URL")
+    url: str
     content: str
     score: float
     search_query: str
@@ -62,19 +50,18 @@ class AllSearchResults(BaseModel):
     results: List[SingleSearchResult]
 
 class SingleExtractedProduct(BaseModel):
-    page_url: str = Field(..., title="Job page URL")
-    Job_Requirements: str = Field(..., title="Job Requirements")
-    Job_Title: str = Field(..., title="Job Title")
-    Job_Description: str = Field(..., title="Job Description")
-    Job_responsibility: str = Field(..., title="Job Responsibilities")
-    qualifications: str = Field(..., title="Qualifications")
+    page_url: str
+    Job_Requirements: str
+    Job_Title: str
+    Job_Description: str
+    Job_responsibility: str
+    qualifications: str
 
 class AllExtractedProducts(BaseModel):
     products: List[SingleExtractedProduct]
 
-# 3. Improved UI inputs with validation
+# 3. UI Inputs
 st.title("AI Job Search Assistant 🤖")
-
 col1, col2 = st.columns(2)
 with col1:
     job_title = st.text_input("Job Title", "AI Developer")
@@ -83,9 +70,9 @@ with col2:
     level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
     score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
 
-# 4. Enhanced tools with error handling
+# 4. Tools
 class SearchEngineToolInput(BaseModel):
-    query: str = Field(..., description="Job search query to execute")
+    query: str
 
 class SearchEngineTool(BaseTool):
     name: str = "Tavily Search"
@@ -104,7 +91,7 @@ class SearchEngineTool(BaseTool):
             return {"error": str(e)}
 
 class WebScrapingToolInput(BaseModel):
-    url: str = Field(..., description="URL of the job posting to scrape")
+    url: str
 
 class WebScrapingTool(BaseTool):
     name: str = "ScrapeGraph"
@@ -122,7 +109,7 @@ class WebScrapingTool(BaseTool):
             st.error(f"Scraping failed: {str(e)}")
             return {"error": str(e)}
 
-# 5. Revised agent configuration
+# 5. Agents
 def create_agents():
     return [
         Agent(
@@ -157,7 +144,7 @@ def create_agents():
         )
     ]
 
-# 6. Optimized tasks with proper formatting
+# 6. Tasks
 def create_tasks(job_title, level, country, score_th):
     return [
         Task(
@@ -197,7 +184,7 @@ def create_tasks(job_title, level, country, score_th):
         )
     ]
 
-# 7. Main workflow with error handling
+# 7. Run CrewAI
 def start_job_search():
     try:
         agents = create_agents()
@@ -208,37 +195,34 @@ def start_job_search():
             tasks=tasks,
             process=Process.sequential,
             memory=True,
-            verbose=True
+            verbose=True  # ✅ Fixed: Ensure this is a boolean
         )
-        
         return crew.kickoff()
     except Exception as e:
         st.error(f"CrewAI process failed: {str(e)}")
         st.stop()
 
-# 8. Enhanced UI handling
+# 8. UI Run
 if st.button("🚀 Start Job Search"):
     with st.spinner("Analyzing job market..."):
         try:
             results = start_job_search()
-            
             st.subheader("Search Strategies")
             st.json(results[0].output.json())
-            
+
             st.subheader("Top Job Opportunities")
             st.dataframe(results[1].output.results)
-            
+
             st.subheader("Extracted Requirements")
             st.dataframe(results[2].output.products)
-            
+
             st.subheader("Essential Skills & Qualifications")
             st.markdown(results[3].output)
-            
         except Exception as e:
             st.error(f"Job search failed: {str(e)}")
             st.stop()
 
-# 9. Deployment instructions
+# 9. Deployment Instructions
 st.sidebar.markdown("""
 **Deployment Guide:**
 1. Install requirements:  
