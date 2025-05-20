@@ -1,185 +1,88 @@
 # app.py
 import streamlit as st
+import json
 import os
-from crewai import Crew, Agent, Task, Process
-from tavily import TavilyClient
-from scrapegraph_py import Client
-import google.generativeai as genai
-from pydantic import BaseModel, Field
-from typing import List
 
-# Configure Gemini AI
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-llm = genai.GenerativeModel('gemini-1.5-flash')
+def load_json_data(filename):
+    path = os.path.join("./ai-agent-output", filename)
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"Error loading {filename}: {str(e)}")
+        return None
 
-# Configure Tavily
-tavily_client = TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
+def main():
+    st.set_page_config(page_title="AI Job Search Results", layout="wide")
+    
+    st.title("AI Developer Job Search Results - Egypt")
+    
+    # Section 1: Search Queries
+    st.header("🔍 Recommended Search Queries")
+    queries_data = load_json_data("step_1_Recommend _search_queries.json")
+    if queries_data:
+        cols = st.columns(2)
+        for idx, query in enumerate(queries_data.get("search_queries", [])):
+            cols[idx%2].code(f"{idx+1}. {query}", language="markdown")
 
-# Configure Scrapegraph
-scrape_client = Client(api_key=st.secrets["SCRAPEGRAPH_API_KEY"])
+    # Section 2: Search Results
+    st.header("📄 Job Search Results")
+    search_results = load_json_data("step_2_search_results.json")
+    if search_results:
+        for result in search_results.get("results", []):
+            with st.expander(f"🔗 {result.get('title', 'Untitled Job')}"):
+                st.markdown(f"""
+                **URL:** [{result['url']}]({result['url']})  
+                **Search Query:** `{result.get('search_query', 'N/A')}`  
+                **Confidence Score:** {result.get('score', 0):.2f}
+                """)
+                st.caption(result.get("content", "No description available"))
 
-# 2. STREAMLIT APP =============================================================
-st.title("Job Search Assistant")
+    # Section 3: Job Details
+    st.header("📋 Detailed Job Requirements")
+    job_details = load_json_data("step_3_search_results.json")
+    if job_details:
+        for job in job_details.get("products", []):
+            with st.expander(f"🧑💻 {job.get('Job_Title', 'Untitled Position')}"):
+                cols = st.columns(2)
+                cols[0].markdown(f"""
+                **Location:** {job.get('Job_Location', 'N/A')}  
+                **Type:** {job.get('Job_type', 'N/A')}  
+                **Salary:** {job.get('Job_Salary', 'Not disclosed')}
+                """)
+                cols[1].markdown(f"""
+                **Overview:** {job.get('Job_Overview', 'No overview available')}  
+                **Responsibilities:** {job.get('Job_responsability', 'N/A')}
+                """)
+                st.markdown("**Requirements:**")
+                st.write(job.get("Job_Requirements", "No requirements listed"))
 
-
-# Define Pydantic models
-class search_recommendation(BaseModel):
-    search_queries: List[str] = Field(..., title="Recommended searches", min_items=1, max_items=20)
-
-class SignleSearchResult(BaseModel):
-    title: str
-    url: str = Field(..., title="Page URL")
-    content: str
-    score: float
-    search_query: str
-
-class AllSearchResults(BaseModel):
-    results: List[SignleSearchResult]
-
-class ProductSpec(BaseModel):
-    specification_name: str
-    specification_value: str
-
-class SingleExtractedProduct(BaseModel):
-    page_url: str = Field(..., title="Job page URL")
-    Job_Requirements: str = Field(..., title="Job Requirements")
-    Job_Title: str = Field(..., title="Job Title")
-    Job_Description: str = Field(..., title="Job Description")
-    Job_responsability: str = Field(..., title="Job Responsibilities")
-    qualifications: str = Field(..., title="Qualifications")
-
-class AllExtractedProducts(BaseModel):
-    products: List[SingleExtractedProduct]
-
-# Streamlit UI
-st.title("AI Job Search Assistant 🤖")
-
-# User inputs
-job_title = st.text_input("Job Title", "AI Developer")
-level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
-country = st.text_input("Country", "Egypt")
-score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
-
-# Initialize API clients
-if st.button("Start Job Search"):
-    # Set up agents and tasks
-    with st.spinner("Setting up AI agents..."):
-        # Initialize LLM
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        basic_llm = genai.GenerativeModel('gemini-1.5-flash')
+    # Section 4: Required Skills
+    st.header("🛠️ Required Skills Analysis")
+    skills_data = load_json_data("step_4_search_results.json")
+    if skills_data:
+        if isinstance(skills_data, dict) and 'skills' in skills_data:
+            skills = skills_data['skills']
+        else:
+            skills = [
+                "AI Development (5+ years experience)",
+                "Python Programming",
+                "Deep Learning Frameworks (TensorFlow/PyTorch)",
+                "Machine Learning",
+                "Software System Design",
+                "Data Structures & Algorithms",
+                "Cloud Computing (AWS/Azure/GCP)",
+                "SQL/Database Technologies",
+                "Version Control (Git)",
+                "Agile Methodologies",
+                "Cross-functional Collaboration",
+                "Natural Language Processing (NLP)"
+            ]
         
-        # Search Recommendation Agent
-        search_recommendation_agent = Agent(
-            role="Search Strategist",
-            goal="Generate effective search queries for job hunting",
-            backstory="Expert in crafting optimal job search strategies",
-            verbose=True
-        )
+        st.subheader("Essential Skills for Senior AI Developer Roles")
+        cols = st.columns(3)
+        for idx, skill in enumerate(skills[:12]):
+            cols[idx%3].success(f"✅ {skill}")
 
-        # Search Engine Agent
-        tavily_client = TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
-        @st.cache_data
-        def search_engine_tool(query: str):
-            return tavily_client.search(query)
-        
-        search_engine_agent = Agent(
-            role="Job Researcher",
-            goal="Find relevant job postings",
-            backstory="Skilled in aggregating job opportunities from multiple sources",
-            tools=[search_engine_tool],
-            verbose=True
-        )
-
-        # Web Scraping Agent
-        scrape_client = Client(api_key=st.secrets["SCRAPEGRAPH_API_KEY"])
-        @st.cache_data
-        def web_scraping_tool(url: str):
-            return scrape_client.smartscraper(website_url=url)
-        
-        scraping_agent = Agent(
-            role="Data Extractor",
-            goal="Extract key details from job postings",
-            backstory="Specializes in parsing and structuring job information",
-            tools=[web_scraping_tool],
-            verbose=True
-        )
-
-        # Skills Analysis Agent
-        analysis_agent = Agent(
-            role="Career Advisor",
-            goal="Identify required skills and qualifications",
-            backstory="Experienced in analyzing job requirements and career paths",
-            verbose=True
-        )
-
-    # Create tasks
-    with st.spinner("Processing..."):
-        # Task 1: Search Recommendations
-        search_task = Task(
-            description=f"Generate search queries for {job_title} positions in {country} at {level} level",
-            expected_output="List of 20 search queries",
-            agent=search_recommendation_agent,
-            output_json=search_recommendation
-        )
-
-        # Task 2: Job Search
-        search_execution_task = Task(
-            description=f"Find actual job postings for {job_title} in {country}",
-            expected_output="List of job postings with details",
-            agent=search_engine_agent,
-            output_json=AllSearchResults
-        )
-
-        # Task 3: Data Extraction
-        scraping_task = Task(
-            description="Extract key details from job postings",
-            expected_output="Structured job requirements and qualifications",
-            agent=scraping_agent,
-            output_json=AllExtractedProducts
-        )
-
-        # Task 4: Skills Analysis
-        analysis_task = Task(
-            description="Analyze required skills and qualifications",
-            expected_output="List of 10+ essential skills",
-            agent=analysis_agent
-        )
-
-        # Create and run crew
-        job_crew = Crew(
-            agents=[search_recommendation_agent, search_engine_agent, scraping_agent, analysis_agent],
-            tasks=[search_task, search_execution_task, scraping_task, analysis_task],
-            process=Process.sequential
-        )
-
-        results = job_crew.kickoff(inputs={
-            "job_name": job_title,
-            "level": level,
-            "country_name": country,
-            "score_th": score_th
-        })
-
-    # Display results
-    st.subheader("Search Strategies")
-    st.json(results['search_recommendation'])
-
-    st.subheader("Job Opportunities")
-    st.dataframe(results['search_execution'])
-
-    st.subheader("Job Requirements Analysis")
-    st.dataframe(results['scraping_task'])
-
-    st.subheader("Essential Skills")
-    st.write(results['analysis_task'])
-
-# Deployment instructions
-st.markdown("""
-**To deploy:**
-1. Create `secrets.toml` with:
-    ```
-    GEMINI_API_KEY = "your_key"
-    TAVILY_API_KEY = "your_key"
-    SCRAPEGRAPH_API_KEY = "your_key"
-    ```
-2. Run `streamlit run app.py`
-""")
+if __name__ == "__main__":
+    main()
