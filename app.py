@@ -5,6 +5,7 @@ sys.modules['sqlite3'] = pysqlite3
 
 import streamlit as st
 from crewai import Crew, Agent, Task, Process
+from crewai.tools import BaseTool
 from tavily import TavilyClient
 from scrapegraph_py import Client
 import google.generativeai as genai
@@ -27,11 +28,7 @@ if not all([gemini_key, tavily_key, scrapegraph_key]):
 genai.configure(api_key=gemini_key)
 llm = genai.GenerativeModel('gemini-1.5-flash')
 
-# Tavily
-tavily_client = TavilyClient(api_key=tavily_key)
-
-# ScrapeGraph
-scrape_client = Client(api_key=scrapegraph_key)
+# Tavily and ScrapeGraph clients will be wrapped in tools
 
 # 4. Streamlit App UI
 st.title("AI Job Search Assistant 🤖")
@@ -67,9 +64,26 @@ level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
 country = st.text_input("Country", "Egypt")
 score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
 
+# Define CrewAI tool wrappers
+class SearchEngineTool(BaseTool):
+    name: str = "Tavily Search"
+    description: str = "Searches job postings via Tavily"
+
+    def run(self, query: str):
+        client = TavilyClient(api_key=tavily_key)
+        return client.search(query)
+
+class WebScrapingTool(BaseTool):
+    name: str = "ScrapeGraph"
+    description: str = "Extracts page details using ScrapeGraph"
+
+    def run(self, url: str):
+        client = Client(api_key=scrapegraph_key)
+        return client.smartscraper(website_url=url)
+
 # Main action
 def start_job_search():
-    # (re)configure Gemini
+    # Ensure Gemini is configured
     genai.configure(api_key=gemini_key)
     basic_llm = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -81,27 +95,19 @@ def start_job_search():
         verbose=True
     )
 
-    @st.cache_data
-    def search_engine_tool(query: str):
-        return TavilyClient(api_key=tavily_key).search(query)
-
     search_engine_agent = Agent(
         role="Job Researcher",
         goal="Find relevant job postings",
         backstory="Skilled in aggregating job opportunities from multiple sources",
-        tools=[search_engine_tool],
+        tools=[SearchEngineTool()],
         verbose=True
     )
-
-    @st.cache_data
-    def web_scraping_tool(url: str):
-        return Client(api_key=scrapegraph_key).smartscraper(website_url=url)
 
     scraping_agent = Agent(
         role="Data Extractor",
         goal="Extract key details from job postings",
         backstory="Specializes in parsing and structuring job information",
-        tools=[web_scraping_tool],
+        tools=[WebScrapingTool()],
         verbose=True
     )
 
@@ -177,7 +183,7 @@ if st.button("Start Job Search"):
 st.sidebar.markdown("""
 **To run locally:**
 
-1. Install dependencies: `pip install streamlit crewai tavily scrapegraph_py google-generative-ai pydantic`
+1. Install dependencies: `pip install streamlit crewai crewai-tools tavily scrapegraph_py google-generative-ai pydantic`
 2. Run: `streamlit run app.py`
 
 Enter your API keys in the sidebar.
