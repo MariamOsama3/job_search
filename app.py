@@ -1,81 +1,111 @@
+# app.py
 import os
-from crewai import Crew, Agent, Task, Tool
-from tavily import TavilyClient
-from scrapegraphai.client import Client
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
+import streamlit as st
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+from typing import List
+from crewai import Crew, Agent, Task, Process
+from crewai import LLM
+import google.generativeai as genai
+from tavily import TavilyClient
+from scrapegraph_py import Client
 
+# Load environment variables
 load_dotenv()
 
-tavily_key = os.getenv("TAVILY_API_KEY")
-scrapegraph_key = os.getenv("SCRAPEGRAPH_API_KEY")
-gemini_key = os.getenv("GEMINI_API_KEY")
+# Initialize APIs
+def initialize_apis():
+    try:
+        # Gemini
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Tavily
+        tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        
+        # Scrapegraph
+        scrape_client = Client(api_key=os.getenv("SCRAPEGRAPH_API_KEY"))
+        
+        return model, tavily_client, scrape_client
+    except Exception as e:
+        st.error(f"Error initializing APIs: {str(e)}")
+        return None, None, None
 
-llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=gemini_key)
+# Define Pydantic models
+class SearchRecommendation(BaseModel):
+    search_queries: List[str] = Field(..., title="Recommended searches", min_items=1, max_items=20)
 
-# Define input models
-class SearchEngineToolInput(BaseModel):
-    query: str = Field(..., description="Job search query to execute")
+class SingleSearchResult(BaseModel):
+    title: str
+    url: str = Field(..., title="Page URL")
+    content: str
+    score: float
+    search_query: str
 
-class WebScrapingToolInput(BaseModel):
-    url: str = Field(..., description="URL of the job posting to scrape")
+class AllSearchResults(BaseModel):
+    results: List[SingleSearchResult]
 
-# Define Tavily search tool
-search_tool = Tool(
-    name="Tavily Search",
-    description="Searches job postings via Tavily",
-    args_schema=SearchEngineToolInput,
-    function=lambda query: TavilyClient(api_key=tavily_key).search(query)
-)
+# Streamlit UI
+def main():
+    st.title("AI Job Search Assistant")
+    
+    # Input Section
+    with st.form("job_params"):
+        st.header("Job Search Parameters")
+        job_name = st.text_input("Job Title", "AI Developer")
+        level = st.selectbox("Experience Level", ["Junior", "Mid", "Senior"])
+        country_name = st.text_input("Country", "Egypt")
+        score_th = st.slider("Confidence Threshold", 0.0, 1.0, 0.7)
+        submit_button = st.form_submit_button("Start Search")
 
-# Define ScrapeGraph scraping tool
-scraper_tool = Tool(
-    name="ScrapeGraph",
-    description="Extracts page details using ScrapeGraph",
-    args_schema=WebScrapingToolInput,
-    function=lambda url: Client(api_key=scrapegraph_key).smartscraper(website_url=url)
-)
+    if submit_button:
+        # Initialize agents and tasks
+        try:
+            # Initialize LLM
+            basic_llm = LLM(
+                model="gemini/gemini-1.5-flash",
+                temperature=0,
+                provider="google_ai_studio",
+                api_key=os.getenv("GEMINI_API_KEY")
+            )
 
-# Define agents
-job_search_agent = Agent(
-    role="Job Search Expert",
-    goal="Find the most relevant and recent job postings",
-    backstory="An expert researcher who uses Tavily to look for jobs",
-    tools=[search_tool],
-    llm=llm,
-    verbose=True,
-)
+            # Create agents
+            search_agent = Agent(
+                role="Search Recommendation Agent",
+                goal="Generate search queries for job search",
+                backstory="Expert in creating effective search queries for job platforms",
+                llm=basic_llm,
+                verbose=True
+            )
 
-job_scraper_agent = Agent(
-    role="Job Description Extractor",
-    goal="Extract detailed job information from provided URLs",
-    backstory="A web scraping specialist who uses ScrapeGraph to extract content",
-    tools=[scraper_tool],
-    llm=llm,
-    verbose=True,
-)
+            # Create tasks
+            search_task = Task(
+                description=f"Generate search queries for {job_name} positions in {country_name} for {level} level",
+                expected_output="JSON list of search queries",
+                output_json=SearchRecommendation,
+                agent=search_agent
+            )
 
-# Define tasks
-search_task = Task(
-    description="Search for the latest job postings about AI research internships.",
-    agent=job_search_agent,
-)
+            # Create and run crew
+            job_crew = Crew(
+                agents=[search_agent],
+                tasks=[search_task],
+                process=Process.sequential
+            )
 
-scrape_task = Task(
-    description="Scrape detailed job descriptions from the URLs retrieved.",
-    agent=job_scraper_agent,
-)
+            # Execute crew
+            results = job_crew.kickoff(inputs={
+                "job_name": job_name,
+                "level": level,
+                "country_name": country_name
+            })
 
-# Assemble the crew
-crew = Crew(
-    agents=[job_search_agent, job_scraper_agent],
-    tasks=[search_task, scrape_task],
-    verbose=True,
-)
+            # Display results
+            st.header("Search Recommendations")
+            st.json(results)
 
-# Run the crew
+        except Exception as e:
+            st.error(f"Error in job search pipeline: {str(e)}")
+
 if __name__ == "__main__":
-    result = crew.kickoff()
-    print(result)
+    main()
