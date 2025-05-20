@@ -208,7 +208,7 @@ def start_job_search():
             tasks=tasks,
             process=Process.sequential,
             memory=True,
-            verbose=2
+            verbose=True
         )
         
         return crew.kickoff()
