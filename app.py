@@ -8,10 +8,9 @@ from crewai import Crew, Agent, Task, Process
 from crewai.tools import BaseTool
 from tavily import TavilyClient
 from scrapegraph_py import Client
-import google.generativeai as genai
 from pydantic import BaseModel, Field
 from typing import List
-from langchain_google_genai import GoogleGenerativeAI  # Added import
+from langchain_google_genai import GoogleGenerativeAI
 
 # 1. Ask user for API keys
 st.sidebar.title("🔑 Enter API Keys")
@@ -24,13 +23,45 @@ if not all([gemini_key, tavily_key, scrapegraph_key]):
     st.sidebar.error("Please provide all three API keys to continue.")
     st.stop()
 
-# 3. Configure Gemini LLM
-llm = GoogleGenerativeAI(  # Changed to Langchain integration
+# 3. Configure LLM
+llm = GoogleGenerativeAI(
     model="gemini-1.5-flash",
     google_api_key=gemini_key
 )
 
-# ... [Keep the Pydantic models and UI elements the same] ...
+# 4. Streamlit App UI
+st.title("AI Job Search Assistant 🤖")
+
+# Define Pydantic models
+class SearchRecommendation(BaseModel):
+    search_queries: List[str] = Field(..., title="Recommended searches", min_items=1, max_items=20)
+
+class SingleSearchResult(BaseModel):
+    title: str
+    url: str = Field(..., title="Page URL")
+    content: str
+    score: float
+    search_query: str
+
+class AllSearchResults(BaseModel):
+    results: List[SingleSearchResult]
+
+class SingleExtractedProduct(BaseModel):
+    page_url: str = Field(..., title="Job page URL")
+    Job_Requirements: str = Field(..., title="Job Requirements")
+    Job_Title: str = Field(..., title="Job Title")
+    Job_Description: str = Field(..., title="Job Description")
+    Job_responsibility: str = Field(..., title="Job Responsibilities")
+    qualifications: str = Field(..., title="Qualifications")
+
+class AllExtractedProducts(BaseModel):
+    products: List[SingleExtractedProduct]
+
+# User inputs
+job_title = st.text_input("Job Title", "AI Developer")
+level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
+country = st.text_input("Country", "Egypt")
+score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
 
 # Define CrewAI tool wrappers
 class SearchEngineToolInput(BaseModel):
@@ -42,7 +73,7 @@ class SearchEngineTool(BaseTool):
     args_schema = SearchEngineToolInput
 
     def _run(self, query: str):
-        client = TavilyClient(api_key=tavily_key)  # Now properly references the input key
+        client = TavilyClient(api_key=tavily_key)
         return client.search(query)
 
 class WebScrapingToolInput(BaseModel):
@@ -54,17 +85,17 @@ class WebScrapingTool(BaseTool):
     args_schema = WebScrapingToolInput
 
     def _run(self, url: str):
-        client = Client(api_key=scrapegraph_key)  # Now properly references the input key
+        client = Client(api_key=scrapegraph_key)
         return client.smartscraper(website_url=url)
 
 # Main action
 def start_job_search():
-    # Agents with explicit LLM configuration
+    # Agents
     search_rec_agent = Agent(
         role="Search Strategist",
         goal="Generate effective search queries for job hunting",
         backstory="Expert in crafting optimal job search strategies",
-        llm=llm,  # Added LLM configuration
+        llm=llm,
         verbose=True
     )
 
@@ -73,7 +104,7 @@ def start_job_search():
         goal="Find relevant job postings",
         backstory="Skilled in aggregating job opportunities from multiple sources",
         tools=[SearchEngineTool()],
-        llm=llm,  # Added LLM configuration
+        llm=llm,
         verbose=True
     )
 
@@ -82,7 +113,7 @@ def start_job_search():
         goal="Extract key details from job postings",
         backstory="Specializes in parsing and structuring job information",
         tools=[WebScrapingTool()],
-        llm=llm,  # Added LLM configuration
+        llm=llm,
         verbose=True
     )
 
@@ -90,9 +121,10 @@ def start_job_search():
         role="Career Advisor",
         goal="Identify required skills and qualifications",
         backstory="Experienced in analyzing job requirements and career paths",
-        llm=llm,  # Added LLM configuration
+        llm=llm,
         verbose=True
     )
+
     # Tasks
     search_task = Task(
         description=f"Generate search queries for {job_title} positions in {country} at {level} level",
@@ -158,7 +190,7 @@ if st.button("Start Job Search"):
 st.sidebar.markdown("""
 **To run locally:**
 
-1. Install dependencies: `pip install streamlit crewai crewai-tools tavily scrapegraph_py google-generative-ai pydantic`
+1. Install dependencies: `pip install streamlit crewai crewai-tools tavily scrapegraph_py langchain-google-genai pydantic`
 2. Run: `streamlit run app.py`
 
 Enter your API keys in the sidebar.
