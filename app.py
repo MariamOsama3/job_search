@@ -15,16 +15,17 @@ from pydantic import BaseModel, Field
 from typing import List
 from langchain_google_genai import GoogleGenerativeAI
 
-# 1. Configure API keys with proper error handling
+# Sidebar for API keys
 st.sidebar.title("🔑 Enter API Keys")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password", key="gemini_api_key")
-tavily_key = st.sidebar.text_input("Tavily API Key", type="password", key="tavily_api_key")
-scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password", key="scrapegraph_api_key")
+gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
+tavily_key = st.sidebar.text_input("Tavily API Key", type="password")
+scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password")
 
 if not all([gemini_key, tavily_key, scrapegraph_key]):
     st.sidebar.error("Please provide all three API keys to continue.")
     st.stop()
 
+# Initialize Gemini LLM
 try:
     llm = GoogleGenerativeAI(
         model="gemini-1.5-flash",
@@ -35,13 +36,13 @@ except Exception as e:
     st.error(f"Failed to initialize Gemini: {str(e)}")
     st.stop()
 
-# 2. Define enhanced Pydantic models
+# Pydantic Models
 class SearchRecommendation(BaseModel):
-    search_queries: List[str] = Field(..., title="Recommended searches", min_items=3, max_items=8)
+    search_queries: List[str] = Field(..., min_items=3, max_items=8)
 
 class SingleSearchResult(BaseModel):
     title: str
-    url: str = Field(..., title="Page URL")
+    url: str
     content: str
     score: float
     search_query: str
@@ -50,7 +51,7 @@ class AllSearchResults(BaseModel):
     results: List[SingleSearchResult]
 
 class SingleExtractedProduct(BaseModel):
-    page_url: str = Field(..., title="Job page URL")
+    page_url: str
     Job_Requirements: str
     Job_Title: str
     Job_Description: str
@@ -60,9 +61,8 @@ class SingleExtractedProduct(BaseModel):
 class AllExtractedProducts(BaseModel):
     products: List[SingleExtractedProduct]
 
-# 3. UI inputs
+# App UI
 st.title("AI Job Search Assistant 🤖")
-
 col1, col2 = st.columns(2)
 with col1:
     job_title = st.text_input("Job Title", "AI Developer")
@@ -71,46 +71,41 @@ with col2:
     level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
     score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
 
-# 4. Tools with proper error handling
+# Tools
 class SearchEngineToolInput(BaseModel):
-    query: str = Field(..., description="Job search query to execute")
+    query: str
 
 class SearchEngineTool(BaseTool):
-    name: str = "Tavily Search"
-    description: str = "Searches job postings via Tavily"
+    name = "Tavily Search"
+    description = "Searches job postings via Tavily"
     args_schema = SearchEngineToolInput
 
     def _run(self, query: str):
         try:
             client = TavilyClient(api_key=tavily_key)
             result = client.search(query)
-            if not result.get('results'):
-                raise ValueError("No results found")
-            return result
+            return result if result.get('results') else {"error": "No results found"}
         except Exception as e:
-            st.error(f"Search failed: {str(e)}")
             return {"error": str(e)}
 
 class WebScrapingToolInput(BaseModel):
-    url: str = Field(..., description="URL of the job posting to scrape")
+    url: str
 
 class WebScrapingTool(BaseTool):
-    name: str = "ScrapeGraph"
-    description: str = "Extracts page details using ScrapeGraph"
+    name = "ScrapeGraph"
+    description = "Extracts page details using ScrapeGraph"
     args_schema = WebScrapingToolInput
 
     def _run(self, url: str):
         try:
             client = Client(api_key=scrapegraph_key)
             result = client.smartscraper(website_url=url)
-            if not result.get('data'):
-                raise ValueError("No data scraped")
-            return result
+            return result if result.get('data') else {"error": "No data scraped"}
         except Exception as e:
-            st.error(f"Scraping failed: {str(e)}")
             return {"error": str(e)}
 
-# 5. Agent setup
+# Agents
+
 def create_agents():
     return [
         Agent(
@@ -145,66 +140,60 @@ def create_agents():
         )
     ]
 
-# 6. Tasks setup
+# Tasks
+
 def create_tasks(job_title, level, country, score_th):
     return [
         Task(
             description=f"""
             Generate 5-8 targeted search queries for {job_title} positions in {country} 
-            suitable for {level} level candidates. Consider variations in job titles and
-            required skills.
+            suitable for {level} level candidates.
             """,
             expected_output="List of search queries in JSON format",
             output_json=SearchRecommendation
         ),
         Task(
             description=f"""
-            Execute the provided search queries to find relevant job postings.
-            Filter results with confidence score above {score_th}.
-            Collect at least 10 valid job listings.
+            Execute the search queries and retrieve job postings.
+            Only include results with a confidence score above {score_th}.
             """,
-            expected_output="Structured list of job postings with metadata",
+            expected_output="Structured list of job postings",
             output_json=AllSearchResults
         ),
         Task(
             description="""
-            Extract detailed job requirements from the collected job postings.
-            Focus on qualifications, responsibilities, and required skills.
-            Validate data completeness before passing to analysis.
+            Extract job details such as requirements, qualifications, responsibilities.
+            Validate the completeness of the extracted data.
             """,
-            expected_output="Structured job requirements data",
+            expected_output="Detailed structured job data",
             output_json=AllExtractedProducts
         ),
         Task(
             description=f"""
-            Analyze extracted data to identify common skills and qualifications.
-            Create a list of 10+ essential requirements for {job_title} roles.
-            Highlight both technical and soft skills.
+            Analyze job data and identify top 10+ skills and qualifications
+            for {job_title} roles.
             """,
-            expected_output="Markdown formatted list of key skills and qualifications"
+            expected_output="Markdown list of key skills"
         )
     ]
 
-# 7. Main CrewAI process
+# Start job search process
+
 def start_job_search():
     try:
-        agents = create_agents()
-        tasks = create_tasks(job_title, level, country, score_th)
-
         crew = Crew(
-            agents=agents,
-            tasks=tasks,
+            agents=create_agents(),
+            tasks=create_tasks(job_title, level, country, score_th),
             process=Process.sequential,
             memory=True,
-            verbose=True  # ✅ Must be boolean!
+            verbose=True
         )
-
         return crew.kickoff()
     except Exception as e:
         st.error(f"CrewAI process failed: {str(e)}")
         st.stop()
 
-# 8. Run job search
+# UI button to start job search
 if st.button("🚀 Start Job Search"):
     with st.spinner("Analyzing job market..."):
         try:
@@ -224,9 +213,8 @@ if st.button("🚀 Start Job Search"):
 
         except Exception as e:
             st.error(f"Job search failed: {str(e)}")
-            st.stop()
 
-# 9. Deployment help
+# Deployment instructions
 st.sidebar.markdown("""
 **Deployment Guide:**
 1. Install dependencies:  
