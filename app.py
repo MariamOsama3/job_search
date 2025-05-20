@@ -4,7 +4,7 @@ try:
     import sys
     sys.modules['sqlite3'] = pysqlite3
 except ImportError:
-    pass  # Fallback to system sqlite3
+    pass
 
 import streamlit as st
 from crewai import Crew, Agent, Task, Process
@@ -13,18 +13,25 @@ from tavily import TavilyClient
 from scrapegraph_py import Client
 from pydantic import BaseModel, Field
 from typing import List
+from langchain_google_genai import GoogleGenerativeAI
 
-try:
-    from langchain_google_genai import GoogleGenerativeAI
-except ImportError:
-    st.error("Missing required package: langchain-google-genai. Install with `pip install langchain-google-genai`")
-    st.stop()
-
-# 1. Ask user for API keys
+# 1. Ask user for API keys with unique widget keys
 st.sidebar.title("🔑 Enter API Keys")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-tavily_key = st.sidebar.text_input("Tavily API Key", type="password")
-scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password")
+gemini_key = st.sidebar.text_input(
+    "Gemini API Key", 
+    type="password",
+    key="gemini_api_key"  # Unique key added
+)
+tavily_key = st.sidebar.text_input(
+    "Tavily API Key", 
+    type="password",
+    key="tavily_api_key"  # Unique key added
+)
+scrapegraph_key = st.sidebar.text_input(
+    "ScrapeGraph API Key", 
+    type="password",
+    key="scrapegraph_api_key"  # Unique key added
+)
 
 if not all([gemini_key, tavily_key, scrapegraph_key]):
     st.sidebar.error("Please provide all three API keys to continue.")
@@ -38,7 +45,6 @@ try:
 except Exception as e:
     st.error(f"Failed to initialize Gemini: {str(e)}")
     st.stop()
-
 # ... [rest of the code remains identical to previous version] ...
 # 1. Ask user for API keys
 st.sidebar.title("🔑 Enter API Keys")
