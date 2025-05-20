@@ -65,15 +65,35 @@ country = st.text_input("Country", "Egypt")
 score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
 
 # Define CrewAI tool wrappers
+# Define CrewAI tool wrappers
+from pydantic import BaseModel
+
+class SearchEngineToolInput(BaseModel):
+    query: str = Field(..., description="Job search query to execute")
+
 class SearchEngineTool(BaseTool):
     name: str = "Tavily Search"
     description: str = "Searches job postings via Tavily"
+    args_schema = SearchEngineToolInput
 
-    def run(self, query: str):
+    def _run(self, query: str):
         client = TavilyClient(api_key=tavily_key)
         return client.search(query)
 
+class WebScrapingToolInput(BaseModel):
+    url: str = Field(..., description="URL of the job posting to scrape")
+
 class WebScrapingTool(BaseTool):
+    name: str = "ScrapeGraph"
+    description: str = "Extracts page details using ScrapeGraph"
+    args_schema = WebScrapingToolInput
+
+    def _run(self, url: str):
+        client = Client(api_key=scrapegraph_key)
+        return client.smartscraper(website_url=url)
+
+# Continue with Main action
+class SearchRecommendation(BaseModel):(BaseTool):
     name: str = "ScrapeGraph"
     description: str = "Extracts page details using ScrapeGraph"
 
