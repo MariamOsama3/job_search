@@ -45,23 +45,6 @@ try:
 except Exception as e:
     st.error(f"Failed to initialize Gemini: {str(e)}")
     st.stop()
-# ... [rest of the code remains identical to previous version] ...
-# 1. Ask user for API keys
-st.sidebar.title("🔑 Enter API Keys")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-tavily_key = st.sidebar.text_input("Tavily API Key", type="password")
-scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password")
-
-# 2. Check inputs
-if not all([gemini_key, tavily_key, scrapegraph_key]):
-    st.sidebar.error("Please provide all three API keys to continue.")
-    st.stop()
-
-# 3. Configure LLM
-llm = GoogleGenerativeAI(
-    model="gemini-1.5-flash",
-    google_api_key=gemini_key
-)
 
 # 4. Streamlit App UI
 st.title("AI Job Search Assistant 🤖")
@@ -126,64 +109,94 @@ class WebScrapingTool(BaseTool):
 def start_job_search():
     # Agents
     search_rec_agent = Agent(
-        role="Search Strategist",
-        goal="Generate effective search queries for job hunting",
-        backstory="Expert in crafting optimal job search strategies",
-        llm=llm,
-        verbose=True
+       role="search_recommendation_agent",
+       goal="""to provide a list of recommendations search queries to be passed to the search engine.
+       The queries must be varied and looking for specific items""",
+       backstory="The agent is designed to help in looking for products by providing a list of suggested search queries to be passed to the search engine based on the context provided.",
+       llm=llm,
+       verbose=True
     )
 
     search_engine_agent = Agent(
-        role="Job Researcher",
-        goal="Find relevant job postings",
-        backstory="Skilled in aggregating job opportunities from multiple sources",
+        role="search engine agent",
+    goal="To search on job baased on suggested search queries",
+    backstory = "that egint desingned to help in finding jobs by using the suggested search queries",
         tools=[SearchEngineTool()],
         llm=llm,
         verbose=True
     )
 
     scraping_agent = Agent(
-        role="Data Extractor",
-        goal="Extract key details from job postings",
-        backstory="Specializes in parsing and structuring job information",
+         role="Web scrap agent to extract information",
+    goal = "to extract information from any website",
+    backstory= "the egint designed to extract required information from any websie and that information will used to understand which skills the jobs need",
+    
         tools=[WebScrapingTool()],
         llm=llm,
         verbose=True
     )
 
     analysis_agent = Agent(
-        role="Career Advisor",
-        goal="Identify required skills and qualifications",
-        backstory="Experienced in analyzing job requirements and career paths",
+       role="extract information about what requirments for every job",
+    goal = "to extract information about what requirments for every job",
+    backstory = "the egint should detecte what requirements for the job according to the job describtion and requirments",
         llm=llm,
         verbose=True
     )
 
     # Tasks
     search_task = Task(
-        description=f"Generate search queries for {job_title} positions in {country} at {level} level",
-        expected_output="List of 20 search queries",
+description = "\n".join([
+        "Mariam is looking for a job as {job_name}",
+        "so the job must be suitable for {level}",
+        "The search query must take the best offers",
+        "I need links of the jobs",
+        "The recommended query must not be more than {the_max_queries} ",
+        "The jop must be in {country_name}"
+    ]),        expected_output="List of 20 search queries",
         agent=search_rec_agent,
         output_json=SearchRecommendation
     )
 
     search_exec_task = Task(
-        description=f"Find actual job postings for {job_title} in {country}",
+        description = "\n".join([
+        "search for jobs based on the suggested search queries",
+        "you have to collect results from the suggested search queries",
+        "ignore any results that are not related to the job",
+        "Ignore any search results with confidence score less than ({score_th}) ",
+        "the search result will be used to summaries the posts to understand what the candidate need to have"
+        "you should give me more that 10 jop"
+
+    ]
         expected_output="List of job postings with details",
         agent=search_engine_agent,
         output_json=AllSearchResults
     )
 
     scraping_task = Task(
-        description="Extract key details from job postings",
+       description = "\n".join([
+        "The task is to extract job details from any job offer page url.",
+        "The task has to collect results from multiple pages urls.",
+        "you should focus on what requirements or qualification or responsibilities",
+        "the results from you the user wil use it to understand which skills he need to have"
+        "I need you to give me more than +5 jobs"
+    ]
         expected_output="Structured job requirements and qualifications",
         agent=scraping_agent,
         output_json=AllExtractedProducts
     )
 
     analysis_task = Task(
-        description="Analyze required skills and qualifications",
-        expected_output="List of 10+ essential skills",
+ description = "\n".join([
+        "extract what skills shoud the candidate of that job should have",
+        "you have to collect results about what each job skills need",
+        "ignore any results that have None values",
+        "Ignore any search results with confidence score less than ({score_th}) ",
+        "the candidate need to understand what skills he should have",
+        "you can also recommend skills from understanding jobs title even if it not in the job description"
+        "I need you to give me +10 skills"
+
+    ]        expected_output="List of 10+ essential skills",
         agent=analysis_agent
     )
 
