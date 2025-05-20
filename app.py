@@ -9,6 +9,9 @@ import google.generativeai as genai
 from tavily import TavilyClient
 from scrapegraph_py import Client
 
+# Disable AgentOps tracking
+os.environ["AGENTOPS_API_KEY"] = "dummy-key"
+
 # Define Pydantic models
 class SearchRecommendation(BaseModel):
     search_queries: List[str] = Field(..., title="Recommended searches", min_items=1, max_items=20)
@@ -45,6 +48,16 @@ class SingleExtractedProduct(BaseModel):
 class AllExtractedProducts(BaseModel):
     products: List[SingleExtractedProduct]
 
+def validate_gemini_key(key: str) -> bool:
+    """Validate Gemini API key"""
+    try:
+        genai.configure(api_key=key)
+        genai.list_models()
+        return True
+    except Exception as e:
+        st.error(f"Gemini API validation failed: {str(e)}")
+        return False
+
 def main():
     st.title("AI Job Search Assistant")
     
@@ -62,13 +75,14 @@ def main():
             
             if st.form_submit_button("Save API Keys"):
                 if gemini_key and tavily_key and scrapegraph_key:
-                    st.session_state.update({
-                        'gemini_key': gemini_key,
-                        'tavily_key': tavily_key,
-                        'scrapegraph_key': scrapegraph_key,
-                        'api_keys_entered': True
-                    })
-                    st.rerun()
+                    if validate_gemini_key(gemini_key):
+                        st.session_state.update({
+                            'gemini_key': gemini_key,
+                            'tavily_key': tavily_key,
+                            'scrapegraph_key': scrapegraph_key,
+                            'api_keys_entered': True
+                        })
+                        st.rerun()
                 else:
                     st.error("Please fill all API key fields")
 
@@ -83,12 +97,12 @@ def main():
             
             if st.form_submit_button("Start Search"):
                 try:
-                    # Initialize APIs
+                    # Initialize APIs with validation
                     genai.configure(api_key=st.session_state.gemini_key)
                     tavily_client = TavilyClient(api_key=st.session_state.tavily_key)
                     scrape_client = Client(api_key=st.session_state.scrapegraph_key)
 
-                    # Initialize LLM
+                    # Initialize LLM with extra validation
                     basic_llm = LLM(
                         model="gemini/gemini-1.5-flash",
                         temperature=0,
@@ -110,8 +124,7 @@ def main():
                         goal="Search for jobs based on recommended queries",
                         backstory="Specialized in executing job searches using various platforms",
                         llm=basic_llm,
-                        verbose=True,
-                        tools=[lambda query: tavily_client.search(query)]
+                        verbose=True
                     )
 
                     scrap_agent = Agent(
@@ -119,8 +132,7 @@ def main():
                         goal="Extract job details from URLs",
                         backstory="Expert in scraping and parsing job postings",
                         llm=basic_llm,
-                        verbose=True,
-                        tools=[lambda url: scrape_client.smartscraper(url)]
+                        verbose=True
                     )
 
                     # Create Tasks
@@ -179,16 +191,17 @@ def main():
                     st.header("Job Search Results")
                     
                     with st.expander("Recommended Search Queries"):
-                        st.json(results['search_recommendation'])
+                        st.json(results.get('search_recommendation', {}))
                     
                     with st.expander("Job Listings"):
-                        st.json(results['search_results'])
+                        st.json(results.get('search_results', {}))
                     
                     with st.expander("Detailed Job Analysis"):
-                        st.json(results['job_details'])
+                        st.json(results.get('job_details', {}))
 
                 except Exception as e:
                     st.error(f"Error in job search pipeline: {str(e)}")
+                    st.stop()
 
         # Reset API keys
         if st.button("Reset API Keys"):
