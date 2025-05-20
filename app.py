@@ -1,6 +1,8 @@
-import __import__('pysqlite3')
+# Workaround for sqlite3 import when using pysqlite3 build
+pysqlite3 = __import__('pysqlite3')
 import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+sys.modules['sqlite3'] = pysqlite3
+
 import streamlit as st
 from crewai import Crew, Agent, Task, Process
 from tavily import TavilyClient
