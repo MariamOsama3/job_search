@@ -153,6 +153,7 @@ def start_job_search():
         "score_th": score_th
     })
 
+# UI Trigger
 if st.button("Start Job Search"):
     with st.spinner("Processing..."):
         results = start_job_search()
@@ -178,4 +179,4 @@ st.sidebar.markdown("""
 2. Run: `streamlit run app.py`
 
 Enter your API keys in the sidebar.
-""
+""")
