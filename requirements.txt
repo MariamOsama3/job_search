@@ -1,5 +1,6 @@
-streamlit
-crewai[agentops]
-agentops
-google-generativeai
-scrapegraph_py
+streamlit>=1.33.0
+crewai[agentops]==0.11.2
+agentops==0.4.12
+google-generativeai==0.3.2
+scrapegraph_py>=1.9.0
+pydantic>=2.4.2,<3.0.0
