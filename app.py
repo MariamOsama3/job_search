@@ -15,11 +15,11 @@ from pydantic import BaseModel, Field
 from typing import List
 from langchain_google_genai import GoogleGenerativeAI
 
-# 1. Configure API keys
+# 1. Configure API keys with proper error handling
 st.sidebar.title("🔑 Enter API Keys")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-tavily_key = st.sidebar.text_input("Tavily API Key", type="password")
-scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password")
+gemini_key = st.sidebar.text_input("Gemini API Key", type="password", key="gemini_api_key")
+tavily_key = st.sidebar.text_input("Tavily API Key", type="password", key="tavily_api_key")
+scrapegraph_key = st.sidebar.text_input("ScrapeGraph API Key", type="password", key="scrapegraph_api_key")
 
 if not all([gemini_key, tavily_key, scrapegraph_key]):
     st.sidebar.error("Please provide all three API keys to continue.")
@@ -35,13 +35,13 @@ except Exception as e:
     st.error(f"Failed to initialize Gemini: {str(e)}")
     st.stop()
 
-# 2. Pydantic models
+# 2. Define enhanced Pydantic models
 class SearchRecommendation(BaseModel):
-    search_queries: List[str] = Field(..., min_items=3, max_items=8)
+    search_queries: List[str] = Field(..., title="Recommended searches", min_items=3, max_items=8)
 
 class SingleSearchResult(BaseModel):
     title: str
-    url: str
+    url: str = Field(..., title="Page URL")
     content: str
     score: float
     search_query: str
@@ -50,7 +50,7 @@ class AllSearchResults(BaseModel):
     results: List[SingleSearchResult]
 
 class SingleExtractedProduct(BaseModel):
-    page_url: str
+    page_url: str = Field(..., title="Job page URL")
     Job_Requirements: str
     Job_Title: str
     Job_Description: str
@@ -60,8 +60,9 @@ class SingleExtractedProduct(BaseModel):
 class AllExtractedProducts(BaseModel):
     products: List[SingleExtractedProduct]
 
-# 3. UI Inputs
+# 3. UI inputs
 st.title("AI Job Search Assistant 🤖")
+
 col1, col2 = st.columns(2)
 with col1:
     job_title = st.text_input("Job Title", "AI Developer")
@@ -70,9 +71,9 @@ with col2:
     level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
     score_th = st.slider("Confidence Score Threshold", 0.0, 1.0, 0.7)
 
-# 4. Tools
+# 4. Tools with proper error handling
 class SearchEngineToolInput(BaseModel):
-    query: str
+    query: str = Field(..., description="Job search query to execute")
 
 class SearchEngineTool(BaseTool):
     name: str = "Tavily Search"
@@ -91,7 +92,7 @@ class SearchEngineTool(BaseTool):
             return {"error": str(e)}
 
 class WebScrapingToolInput(BaseModel):
-    url: str
+    url: str = Field(..., description="URL of the job posting to scrape")
 
 class WebScrapingTool(BaseTool):
     name: str = "ScrapeGraph"
@@ -109,7 +110,7 @@ class WebScrapingTool(BaseTool):
             st.error(f"Scraping failed: {str(e)}")
             return {"error": str(e)}
 
-# 5. Agents
+# 5. Agent setup
 def create_agents():
     return [
         Agent(
@@ -144,7 +145,7 @@ def create_agents():
         )
     ]
 
-# 6. Tasks
+# 6. Tasks setup
 def create_tasks(job_title, level, country, score_th):
     return [
         Task(
@@ -184,29 +185,31 @@ def create_tasks(job_title, level, country, score_th):
         )
     ]
 
-# 7. Run CrewAI
+# 7. Main CrewAI process
 def start_job_search():
     try:
         agents = create_agents()
         tasks = create_tasks(job_title, level, country, score_th)
-        
+
         crew = Crew(
             agents=agents,
             tasks=tasks,
             process=Process.sequential,
             memory=True,
-            verbose=True  # ✅ Fixed: Ensure this is a boolean
+            verbose=True  # ✅ Must be boolean!
         )
+
         return crew.kickoff()
     except Exception as e:
         st.error(f"CrewAI process failed: {str(e)}")
         st.stop()
 
-# 8. UI Run
+# 8. Run job search
 if st.button("🚀 Start Job Search"):
     with st.spinner("Analyzing job market..."):
         try:
             results = start_job_search()
+
             st.subheader("Search Strategies")
             st.json(results[0].output.json())
 
@@ -218,16 +221,17 @@ if st.button("🚀 Start Job Search"):
 
             st.subheader("Essential Skills & Qualifications")
             st.markdown(results[3].output)
+
         except Exception as e:
             st.error(f"Job search failed: {str(e)}")
             st.stop()
 
-# 9. Deployment Instructions
+# 9. Deployment help
 st.sidebar.markdown("""
 **Deployment Guide:**
-1. Install requirements:  
+1. Install dependencies:  
    `pip install streamlit crewai tavily scrapegraph_py langchain-google-genai`
-2. Run with:  
+2. Run the app:  
    `streamlit run app.py`
-3. Monitor API usage in provider dashboards
+3. Monitor your API key usage in each provider dashboard.
 """)
