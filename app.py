@@ -1,6 +1,5 @@
 import os
-from crewai import Crew, Agent, Task
-from crewai_tools import BaseTool
+from crewai import Crew, Agent, Task, Tool
 from tavily import TavilyClient
 from scrapegraphai.client import Client
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -23,41 +22,21 @@ class SearchEngineToolInput(BaseModel):
 class WebScrapingToolInput(BaseModel):
     url: str = Field(..., description="URL of the job posting to scrape")
 
-# Tool for job search using Tavily
-class SearchEngineTool(BaseTool):
-    name: str = "Tavily Search"
-    description: str = "Searches job postings via Tavily"
-    args_schema = SearchEngineToolInput
+# Define Tavily search tool
+search_tool = Tool(
+    name="Tavily Search",
+    description="Searches job postings via Tavily",
+    args_schema=SearchEngineToolInput,
+    function=lambda query: TavilyClient(api_key=tavily_key).search(query)
+)
 
-    def _run(self, query: str):
-        try:
-            client = TavilyClient(api_key=tavily_key)
-            result = client.search(query)
-            if not result.get('results'):
-                raise ValueError("No results found")
-            return result
-        except Exception as e:
-            return {"error": str(e)}
-
-# Tool for scraping job post content using ScrapeGraph
-class WebScrapingTool(BaseTool):
-    name: str = "ScrapeGraph"
-    description: str = "Extracts page details using ScrapeGraph"
-    args_schema = WebScrapingToolInput
-
-    def _run(self, url: str):
-        try:
-            client = Client(api_key=scrapegraph_key)
-            result = client.smartscraper(website_url=url)
-            if not result.get('data'):
-                raise ValueError("No data scraped")
-            return result
-        except Exception as e:
-            return {"error": str(e)}
-
-# Define tools
-search_tool = SearchEngineTool()
-scraper_tool = WebScrapingTool()
+# Define ScrapeGraph scraping tool
+scraper_tool = Tool(
+    name="ScrapeGraph",
+    description="Extracts page details using ScrapeGraph",
+    args_schema=WebScrapingToolInput,
+    function=lambda url: Client(api_key=scrapegraph_key).smartscraper(website_url=url)
+)
 
 # Define agents
 job_search_agent = Agent(
@@ -97,5 +76,6 @@ crew = Crew(
 )
 
 # Run the crew
-result = crew.kickoff()
-print(result)
+if __name__ == "__main__":
+    result = crew.kickoff()
+    print(result)
