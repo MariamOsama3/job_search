@@ -1,157 +1,97 @@
-# app.py
-import streamlit as st
 import os
-import json
-from typing import List
-from pydantic import BaseModel, Field
-from crewai import Crew, Agent, Task, Process, LLM
-from tavily import TavilyClient
-from scrapegraph_py import Client
-import google.generativeai as genai
+import streamlit as st
+from agents import (
+    search_engine_agent, search_engine_task,
+    scrap_agent, scrap_task,
+    summarize_agent, summarize_task,
+    skills_agent, skills_task,
+)
 
-# ------------ Pydantic Models (From Notebook) ------------
-class search_recommendation(BaseModel):
-    search_queries: List[str] = Field(..., 
-                                     title="Recommended searches",
-                                     min_items=1, 
-                                     max_items=20)
+# --------------------
+# Page 1: API Key Input
+# --------------------
+st.set_page_config(page_title="Job Search AI", layout="wide")
 
-class SignleSearchResult(BaseModel):
-    title: str
-    url: str = Field(..., title="Page URL")
-    content: str
-    score: float
-    search_query: str
+if "api_key" not in st.session_state:
+    st.session_state.api_key = ""
 
-class AllSearchResults(BaseModel):
-    results: List[SignleSearchResult]
+page = st.sidebar.selectbox(
+    "Navigation",
+    ["1. API Key", "2. Job Query", "3. Results"]
+)
 
-class ProductSpec(BaseModel):
-    specification_name: str
-    specification_value: str
+if page == "1. API Key":
+    st.title("🔑 Enter Your API Key")
+    key = st.text_input("Gemini / OpenAI API Key", type="password")
+    if st.button("Save Key"):
+        st.session_state.api_key = key
+        os.environ["GEMINI_API_KEY"] = key
+        st.success("API key saved!")
 
-class SingleExtractedProduct(BaseModel):
-    page_url: str = Field(..., title="Job page URL")
-    Job_Requirements: str = Field(...)
-    Job_Title: str = Field(...)
-    Job_Details: str = Field(default=None)
-    Job_Description: str = Field(...)
-    Job_Location: str = Field(default=None)
-    Job_Salary: str = Field(default=None)
-    Job_responsability: str = Field(...)
-    Job_type: str = Field(default=None)
-    Job_Overview: str = Field(...)
-    qualifications: str = Field(...)
-    product_specs: List[ProductSpec]
-    agent_recommendation_notes: List[str]
+# --------------------
+# Page 2: Job Query
+# --------------------
+elif page == "2. Job Query":
+    st.title("🔍 Select Job Search Term")
+    query = st.text_input("Job title or keywords to search for:")
+    if st.button("Run Search"):
+        if not st.session_state.api_key:
+            st.error("Please enter and save your API key on page 1.")
+        elif not query:
+            st.error("Please enter a job query to search.")
+        else:
+            st.session_state.query = query
+            st.session_state.results = []
+            # Agent 1: Generate refined search queries
+            refined = search_engine_agent.run(
+                task=search_engine_task,
+                query=query
+            )
+            st.session_state.refined_queries = refined
+            # Agent 2: Scrape job listings
+            listings = scrap_agent.run(
+                task=scrap_task,
+                queries=refined
+            )
+            st.session_state.listings = listings
+            # Agent 3: Summarize descriptions
+            summaries = summarize_agent.run(
+                task=summarize_task,
+                listings=listings
+            )
+            st.session_state.summaries = summaries
+            # Agent 4: Extract skills
+            skills = skills_agent.run(
+                task=skills_task,
+                summaries=summaries
+            )
+            st.session_state.skills = skills
+            st.success("Search completed! Go to '3. Results' to view.")
 
-class AllExtractedProducts(BaseModel):
-    products: List[SingleExtractedProduct]
-
-# ------------ Streamlit Pages ------------
-def setup_api_keys():
-    st.title("🔑 API Keys Configuration")
-    with st.form("api_keys"):
-        gemini_key = st.text_input("Gemini API Key", type="password")
-        tavily_key = st.text_input("Tavily API Key", type="password")
-        scrap_key = st.text_input("Scraping API Key", type="password")
-        
-        if st.form_submit_button("Save Keys"):
-            st.session_state.gemini_key = gemini_key
-            st.session_state.tavily_key = tavily_key
-            st.session_state.scrap_key = scrap_key
-            st.session_state.page = "search_params"
-            st.rerun()
-
-def search_parameters():
-    st.title("🔍 Job Search Parameters")
-    with st.form("job_search"):
-        job_name = st.text_input("Job Title", "AI Developer")
-        level = st.selectbox("Experience Level", ["Junior", "Mid-Level", "Senior"])
-        country = st.text_input("Country", "Egypt")
-        max_queries = st.slider("Max Search Queries", 5, 20, 15)
-        
-        if st.form_submit_button("Start Search"):
-            try:
-                run_crewai_pipeline(job_name, level, country, max_queries)
-                st.session_state.page = "results"
-                st.rerun()
-            except Exception as e:
-                st.error(f"Search failed: {str(e)}")
-
-def display_results():
-    st.title("📊 Job Search Results")
-    
-    # Section 1: Search Queries
-    with st.expander("🔎 Generated Search Queries", expanded=True):
-        if 'search_queries' in st.session_state:
-            for idx, query in enumerate(st.session_state.search_queries, 1):
-                st.markdown(f"{idx}. `{query}`")
-    
-    # Section 2: Job Listings
-    with st.expander("💼 Found Job Opportunities", expanded=True):
-        if 'search_results' in st.session_state:
-            for result in st.session_state.search_results:
-                cols = st.columns([1, 4])
-                with cols[0]:
-                    st.metric("Confidence", f"{result.score:.0%}")
-                with cols[1]:
-                    st.subheader(result.title)
-                    st.markdown(f"**URL:** {result.url}")
-                    st.caption(result.content[:200] + "...")
-    
-    # Section 3: Required Skills
-    with st.expander("🛠️ Required Skills Analysis", expanded=True):
-        if 'skills' in st.session_state:
-            for skill in st.session_state.skills:
-                st.markdown(f"- {skill}")
-
-# ------------ CrewAI Pipeline (From Notebook) ------------
-def run_crewai_pipeline(job_name, level, country, max_queries):
-    # Initialize clients
-    genai.configure(api_key=st.session_state.gemini_key)
-    tavily_client = TavilyClient(api_key=st.session_state.tavily_key)
-    scrape_client = Client(api_key=st.session_state.scrap_key)
-
-    # Define Agents (Original Prompts)
-    search_agent = Agent(
-        role="search_recommendation_agent",
-        goal="Provide list of search queries for job search",
-        backstory="Expert in generating effective search queries",
-        llm=LLM(model="gemini/gemini-1.5-flash", temperature=0),
-        verbose=True
-    )
-
-    # ... [Include ALL original agents/tasks from notebook] ...
-
-    # Run pipeline
-    crew = Crew(
-        agents=[search_agent, engine_agent, scrap_agent, summarize_agent],
-        tasks=[search_task, engine_task, scrap_task, summarize_task],
-        process=Process.sequential
-    )
-
-    result = crew.kickoff(inputs={
-        "job_name": job_name,
-        "level": level,
-        "country_name": country,
-        "the_max_queries": max_queries,
-        "score_th": 0.02
-    })
-
-    # Store results in session state
-    st.session_state.search_queries = json.loads(result["search_queries"])
-    st.session_state.search_results = json.loads(result["results"])
-    st.session_state.skills = json.loads(result["skills"])
-
-# ------------ Main App Flow ------------
-if "page" not in st.session_state:
-    st.session_state.page = "api_keys"
-
-pages = {
-    "api_keys": setup_api_keys,
-    "search_params": search_parameters,
-    "results": display_results
-}
-
-pages[st.session_state.page]()
+# --------------------
+# Page 3: Results
+# --------------------
+elif page == "3. Results":
+    st.title("📋 Search Results")
+    if not st.session_state.get("results") and not st.session_state.get("listings"):
+        st.info("No results yet. Run a search on page 2.")
+    else:
+        # 1) Show refined queries
+        st.header("1. Search Queries Generated")
+        for q in st.session_state.refined_queries:
+            st.write(f"- **Query:** {q}")
+        # 2) Show job listings with title and URL
+        st.header("2. Job Listings Found")
+        for job in st.session_state.listings:
+            st.subheader(job['title'])
+            st.write(f"🔗 [Job Link]({job['url']})")
+        # 3) Show descriptions
+        st.header("3. Job Descriptions")
+        for idx, desc in enumerate(st.session_state.summaries):
+            st.markdown(f"**{idx+1}.** {desc}")
+        # 4) Show required skills
+        st.header("4. Required Skills")
+        for job_skills in st.session_state.skills:
+            st.markdown(
+                "- " + ", ".join(job_skills)
+            )
