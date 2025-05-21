@@ -1,16 +1,364 @@
-import streamlit as st
+def run_search_recommendation_agent(job_name, level, country_name, max_queries, output_dir, basic_llm):
+    """Run the Search Recommendation Agent independently"""
+    try:
+        # Define Pydantic model
+        class search_recommendation(BaseModel):
+            search_queries: List[str] = Field(..., title="Recommended searches to be sent to the search engines", min_items=1, max_items=max_queries)
+        
+        # Initialize agent
+        search_recommendation_agent = Agent(
+            role="search_recommendation_agent",
+            goal="to provide a list of recommendations search queries to be passed to the search engine. The queries must be varied and looking for specific items",
+            backstory="The agent is designed to help in looking for products by providing a list of suggested search queries to be passed to the search engine based on the context provided.",
+            llm=basic_llm,
+            verbose=True,
+        )
+        
+        search_recommendation_task = Task(
+            description="\n".join([
+                f"Mariam is looking for a job as {job_name}",
+                f"so the job must be suitable for {level}",
+                "The search query must take the best offers",
+                "I need links of the jobs",
+                f"The recommended query must not be more than {max_queries}",
+                f"The job must be in {country_name}"
+            ]),
+            expected_output="A JSON object containing a list of suggested search queries.",
+            output_json=search_recommendation,
+            agent=search_recommendation_agent,
+            output_file=os.path.join(output_dir, "step_1_Recommend_search_queries.json"),
+        )
+        
+        # Create a single-task crew
+        crew = Crew(
+            agents=[search_recommendation_agent],
+            tasks=[search_recommendation_task],
+            process=Process.sequential,
+            verbose=2,
+        )
+        
+        # Run the crew
+        result = crew.kickoff(
+            inputs={
+                "job_name": job_name,
+                "the_max_queries": max_queries,
+                "level": level,
+                "country_name": country_name
+            }
+        )
+        
+        return result, None
+    
+    except Exception as e:
+        if debug_mode:
+            st.sidebar.error(f"Search Recommendation Agent Error: {str(e)}")
+            st.sidebar.code(traceback.format_exc())
+        return None, str(e)
+
+
+def run_search_engine_agent(score_threshold, output_dir, basic_llm):
+    """Run the Search Engine Agent independently"""
+    try:
+        # Define Pydantic models
+        class SignleSearchResult(BaseModel):
+            title: str
+            url: str = Field(..., title="the page url")
+            content: str
+            score: float
+            search_query: str
+
+        class AllSearchResults(BaseModel):
+            results: List[SignleSearchResult]
+        
+        # Initialize search client
+        search_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+        
+        @tool
+        def search_engine_tool(query: str):
+            """Useful for search-based queries. Use this to find current information about any query related pages using a search engine"""
+            return search_client.search(query)
+        
+        search_engine_agent = Agent(
+            role="search engine agent",
+            goal="To search on job based on suggested search queries",
+            backstory="This agent is designed to help in finding jobs by using the suggested search queries",
+            llm=basic_llm,
+            verbose=True,
+            tools=[search_engine_tool]
+        )
+        
+        # Load search queries from previous agent
+        try:
+            with open(os.path.join(output_dir, "step_1_Recommend_search_queries.json"), "r") as f:
+                search_queries_data = json.load(f)
+                search_queries = search_queries_data.get("search_queries", [])
+                
+                if not search_queries:
+                    return None, "No search queries found from previous agent"
+        except FileNotFoundError:
+            return None, "Search queries file not found"
+        
+        search_engine_task = Task(
+            description="\n".join([
+                "search for jobs based on the suggested search queries",
+                "you have to collect results from the suggested search queries",
+                "ignore any results that are not related to the job",
+                f"Ignore any search results with confidence score less than ({score_threshold})",
+                "the search result will be used to summarize the posts to understand what the candidate needs to have",
+                "you should give me more than 10 jobs"
+            ]),
+            expected_output="A JSON object containing search results.",
+            output_json=AllSearchResults,
+            agent=search_engine_agent,
+            output_file=os.path.join(output_dir, "step_2_search_results.json")
+        )
+        
+        # Create a single-task crew
+        crew = Crew(
+            agents=[search_engine_agent],
+            tasks=[search_engine_task],
+            process=Process.sequential,
+            verbose=2,
+        )
+        
+        # Run the crew
+        result = crew.kickoff(
+            inputs={
+                "search_queries": search_queries,
+                "score_th": score_threshold
+            }
+        )
+        
+        return result, None
+    
+    except Exception as e:
+        if debug_mode:
+            st.sidebar.error(f"Search Engine Agent Error: {str(e)}")
+            st.sidebar.code(traceback.format_exc())
+        return None, str(e)
+
+
+def run_web_scraper_agent(output_dir, basic_llm):
+    """Run the Web Scraper Agent independently"""
+    try:
+        # Define Pydantic models
+        class ProductSpec(BaseModel):
+            specification_name: str
+            specification_value: str
+
+        class SingleExtractedProduct(BaseModel):
+            page_url: str = Field(..., title="The original url of the job page")
+            Job_Requirements: str = Field(..., title="The requirements of the job")
+            Job_Title: str = Field(..., title="The title of the job")
+            Job_Details: str = Field(title="The Details of the job", default=None)
+            Job_Description: str = Field(..., title="The Description of the job")
+            Job_Location: str = Field(title="The location of the job", default=None)
+            Job_Salary: str = Field(title="The salary of the job", default=None)
+            Job_responsability: str = Field(..., title="The responsibility of the job")
+            Job_type: str = Field(title="The type of the job", default=None)
+            Job_Overview: str = Field(..., title="The overview of the job")
+            qualifications: str = Field(..., title="The qualifications of the job")
+            product_specs: List[ProductSpec] = Field(..., title="The specifications of the product. Focus on the most important requirements.", min_items=1, max_items=5)
+            agent_recommendation_notes: List[str] = Field(..., title="A set of notes why would you recommend or not recommend this job to the candidate, compared to other jobs.")
+
+        class AllExtractedProducts(BaseModel):
+            products: List[SingleExtractedProduct]
+        
+        # Initialize scrape client
+        scrape_client = Client(api_key=os.environ["SCRAPEGRAPH_API_KEY"])
+        
+        @tool
+        def web_scraping_tool(page_url: str):
+            """An AI Tool to help an agent to scrape a web page"""
+            details = scrape_client.smartscraper(
+                website_url=page_url,
+                user_prompt="Extract ```json\n" + SingleExtractedProduct.schema_json() + "```\n From the web page"
+            )
+            return {
+                "page_url": page_url,
+                "details": details
+            }
+        
+        search_scrap_agent = Agent(
+            role="Web scrap agent to extract url information",
+            goal="to extract information from any website",
+            backstory="the agent designed to extract required information from any website and that information will be used to understand which skills the jobs need",
+            llm=basic_llm,
+            verbose=True,
+            tools=[web_scraping_tool]
+        )
+        
+        # Load search results from previous agent
+        try:
+            with open(os.path.join(output_dir, "step_2_search_results.json"), "r") as f:
+                search_results_data = json.load(f)
+                search_results = search_results_data.get("results", [])
+                
+                if not search_results:
+                    return None, "No search results found from previous agent"
+        except FileNotFoundError:
+            return None, "Search results file not found"
+        
+        search_scrap_task = Task(
+            description="\n".join([
+                "The task is to extract job details from any job offer page url.",
+                "The task has to collect results from multiple pages urls.",
+                "you should focus on what requirements or qualification or responsibilities",
+                "the results from you the user will use it to understand which skills he need to have"
+                "I need you to give me more than +5 jobs"
+            ]),
+            expected_output="A JSON object containing jobs details",
+            output_json=AllExtractedProducts,
+            output_file=os.path.join(output_dir, "step_3_search_results.json"),
+            agent=search_scrap_agent
+        )
+        
+        # Create a single-task crew
+        crew = Crew(
+            agents=[search_scrap_agent],
+            tasks=[search_scrap_task],
+            process=Process.sequential,
+            verbose=2,
+        )
+        
+        # Get URLs from search results
+        urls = [result.get("url") for result in search_results if result.get("url")]
+        
+        # Run the crew
+        result = crew.kickoff(
+            inputs={
+                "urls": urls[:10]  # Limit to 10 URLs to avoid timeouts
+            }
+        )
+        
+        return result, None
+    
+    except Exception as e:
+        if debug_mode:
+            st.sidebar.error(f"Web Scraper Agent Error: {str(e)}")
+            st.sidebar.code(traceback.format_exc())
+        return None, str(e)
+
+
+def run_skills_summarizer_agent(score_threshold, output_dir, basic_llm):
+    """Run the Skills Summarizer Agent independently"""
+    try:
+        search_summarize_agent = Agent(
+            role="extract information about what requirements for every job",
+            goal="to extract information about what requirements for every job",
+            backstory="the agent should detect what requirements for the job according to the job description and requirements",
+            llm=basic_llm,
+            verbose=True,
+        )
+        
+        # Load job details from previous agent
+        try:
+            with open(os.path.join(output_dir, "step_3_search_results.json"), "r") as f:
+                job_details_data = json.load(f)
+                job_details = job_details_data.get("products", [])
+                
+                if not job_details:
+                    return None, "No job details found from previous agent"
+        except FileNotFoundError:
+            return None, "Job details file not found"
+        
+        search_summarize_task = Task(
+            description="\n".join([
+                "extract what skills should the candidate of that job should have",
+                "you have to collect results about what each job skills need",
+                "ignore any results that have None values",
+                f"Ignore any search results with confidence score less than ({score_threshold})",
+                "the candidate needs to understand what skills he should have",
+                "you can also recommend skills from understanding jobs title even if it not in the job description"
+                "I need you to give me +10 skills"
+            ]),
+            expected_output="Summary of what skills that job need candidate to have",
+            agent=search_summarize_agent,
+            output_file=os.path.join(output_dir, "step_4_search_results.json")
+        )
+        
+        # Create a single-task crew
+        crew = Crew(
+            agents=[search_summarize_agent],
+            tasks=[search_summarize_task],
+            process=Process.sequential,
+            verbose=2,
+        )
+        
+        # Run the crew
+        result = crew.kickoff(
+            inputs={
+                "job_details": job_details,
+                "score_th": score_threshold
+            }
+        )
+        
+        return result, None
+    
+    except Exception as e:
+        if debug_mode:
+            st.sidebar.error(f"Skills Summarizer Agent Error: {str(e)}")
+            st.sidebar.code(traceback.format_exc())
+        return None, str(e)import streamlit as st
 import os
 import json
 import time
+import sys
+import traceback
 from pydantic import BaseModel, Field
 from typing import List
 
-# Import the required libraries for the agent setup
-from crewai import Crew, Agent, Task, Process, LLM
-from tavily import TavilyClient
-from scrapegraph_py import Client
-from crewai.tools import tool
-import google.generativeai as genai
+# Streamlit error handling for imports
+st.set_page_config(
+    page_title="Job Search AI Agent",
+    page_icon="🔍",
+    layout="wide",
+)
+
+# Function to handle missing imports and provide instructions
+def import_with_error_handling():
+    missing_packages = []
+    
+    try:
+        from crewai import Crew, Agent, Task, Process, LLM
+    except ImportError:
+        missing_packages.append("crewai")
+    
+    try:
+        from tavily import TavilyClient
+    except ImportError:
+        missing_packages.append("tavily-python")
+    
+    try:
+        from scrapegraph_py import Client
+    except ImportError:
+        missing_packages.append("scrapegraph-py")
+    
+    try:
+        from crewai.tools import tool
+    except ImportError:
+        if "crewai" not in missing_packages:
+            missing_packages.append("crewai")
+    
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        missing_packages.append("google-generativeai")
+        
+    if missing_packages:
+        st.error(f"Missing required packages: {', '.join(missing_packages)}")
+        st.code(f"pip install {' '.join(missing_packages)}", language="bash")
+        st.stop()
+    
+    return True
+
+# Try importing necessary libraries
+if import_with_error_handling():
+    from crewai import Crew, Agent, Task, Process, LLM
+    from tavily import TavilyClient
+    from scrapegraph_py import Client
+    from crewai.tools import tool
+    import google.generativeai as genai
 
 # Set page config
 st.set_page_config(
@@ -29,6 +377,15 @@ The process involves four specialized agents working together:
 3. **Web Scraper Agent**: Extracts detailed information from job listings
 4. **Skills Summarizer Agent**: Summarizes the skills required for the job positions
 """)
+
+# Debug mode toggle
+with st.sidebar:
+    st.header("Debug Options")
+    debug_mode = st.checkbox("Enable Debug Mode", value=False)
+    
+    if debug_mode:
+        st.write("Python version:", sys.version)
+        st.write("Current directory:", os.getcwd())
 
 # Initialize session state variables if they don't exist
 if "api_keys_set" not in st.session_state:
@@ -58,11 +415,61 @@ with st.expander("🔑 Configure API Keys", expanded=not st.session_state.api_ke
     
     if st.button("Set API Keys"):
         if gemini_key and tavily_key and scrapegraph_key:
-            os.environ["GEMINI_API_KEY"] = gemini_key
-            os.environ["TAVILY_API_KEY"] = tavily_key
-            os.environ["SCRAPEGRAPH_API_KEY"] = scrapegraph_key
-            st.session_state.api_keys_set = True
-            st.success("API keys set successfully!")
+            # Test the API keys before saving
+            test_status = st.empty()
+            test_status.info("Testing API keys...")
+            keys_valid = True
+            
+            # Test Gemini API
+            try:
+                test_status.info("Testing Gemini API key...")
+                os.environ["GEMINI_API_KEY"] = gemini_key
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content("Hello")
+                if debug_mode:
+                    st.sidebar.success("Gemini API test successful")
+            except Exception as e:
+                keys_valid = False
+                test_status.error(f"Gemini API key error: {str(e)}")
+                if debug_mode:
+                    st.sidebar.error(f"Gemini API error: {traceback.format_exc()}")
+            
+            # Test Tavily API
+            if keys_valid:
+                try:
+                    test_status.info("Testing Tavily API key...")
+                    os.environ["TAVILY_API_KEY"] = tavily_key
+                    client = TavilyClient(api_key=tavily_key)
+                    # Just initialize the client without making an actual API call
+                    if debug_mode:
+                        st.sidebar.success("Tavily API key format valid")
+                except Exception as e:
+                    keys_valid = False
+                    test_status.error(f"Tavily API key error: {str(e)}")
+                    if debug_mode:
+                        st.sidebar.error(f"Tavily API error: {traceback.format_exc()}")
+            
+            # Test ScapeGraph API
+            if keys_valid:
+                try:
+                    test_status.info("Testing ScapeGraph API key...")
+                    os.environ["SCRAPEGRAPH_API_KEY"] = scrapegraph_key
+                    # Just initialize the client without making an actual API call
+                    client = Client(api_key=scrapegraph_key)
+                    if debug_mode:
+                        st.sidebar.success("ScapeGraph API key format valid")
+                except Exception as e:
+                    keys_valid = False
+                    test_status.error(f"ScapeGraph API key error: {str(e)}")
+                    if debug_mode:
+                        st.sidebar.error(f"ScapeGraph API error: {traceback.format_exc()}")
+            
+            if keys_valid:
+                st.session_state.api_keys_set = True
+                test_status.success("All API keys validated successfully!")
+            else:
+                test_status.error("One or more API keys failed validation. Please check the errors and try again.")
         else:
             st.error("Please provide all required API keys.")
 
@@ -106,88 +513,76 @@ if st.session_state.api_keys_set:
                 api_key=os.environ["GEMINI_API_KEY"]
             )
             
-            # Define Pydantic models
-            class search_recommendation(BaseModel):
-                search_queries: List[str] = Field(..., title="Recommended searches to be sent to the search engines", min_items=1, max_items=max_queries)
+            # Run each agent individually with error handling
+            results = {}
+            errors = {}
             
-            class SignleSearchResult(BaseModel):
-                title: str
-                url: str = Field(..., title="the page url")
-                content: str
-                score: float
-                search_query: str
-
-            class AllSearchResults(BaseModel):
-                results: List[SignleSearchResult]
-            
-            class ProductSpec(BaseModel):
-                specification_name: str
-                specification_value: str
-
-            class SingleExtractedProduct(BaseModel):
-                page_url: str = Field(..., title="The original url of the job page")
-                Job_Requirements: str = Field(..., title="The requirements of the job")
-                Job_Title: str = Field(..., title="The title of the job")
-                Job_Details: str = Field(title="The Details of the job", default=None)
-                Job_Description: str = Field(..., title="The Description of the job")
-                Job_Location: str = Field(title="The location of the job", default=None)
-                Job_Salary: str = Field(title="The salary of the job", default=None)
-                Job_responsability: str = Field(..., title="The responsibility of the job")
-                Job_type: str = Field(title="The type of the job", default=None)
-                Job_Overview: str = Field(..., title="The overview of the job")
-                qualifications: str = Field(..., title="The qualifications of the job")
-                product_specs: List[ProductSpec] = Field(..., title="The specifications of the product. Focus on the most important requirements.", min_items=1, max_items=5)
-                agent_recommendation_notes: List[str] = Field(..., title="A set of notes why would you recommend or not recommend this job to the candidate, compared to other jobs.")
-
-            class AllExtractedProducts(BaseModel):
-                products: List[SingleExtractedProduct]
-            
-            # Initialize agents
-            progress_container.info("Initializing Search Recommendation Agent...")
-            search_recommendation_agent = Agent(
-                role="search_recommendation_agent",
-                goal="to provide a list of recommendations search queries to be passed to the search engine. The queries must be varied and looking for specific items",
-                backstory="The agent is designed to help in looking for products by providing a list of suggested search queries to be passed to the search engine based on the context provided.",
-                llm=basic_llm,
-                verbose=True,
+            # Agent 1: Search Recommendation Agent
+            progress_container.info("Running Search Recommendation Agent...")
+            results["search_recommendation_task"], errors["search_recommendation_task"] = run_search_recommendation_agent(
+                job_name, level, country_name, max_queries, output_dir, basic_llm
             )
             
-            search_recommendation_task = Task(
-                description="\n".join([
-                    f"Mariam is looking for a job as {job_name}",
-                    f"so the job must be suitable for {level}",
-                    "The search query must take the best offers",
-                    "I need links of the jobs",
-                    f"The recommended query must not be more than {max_queries}",
-                    f"The job must be in {country_name}"
-                ]),
-                expected_output="A JSON object containing a list of suggested search queries.",
-                output_json=search_recommendation,
-                agent=search_recommendation_agent,
-                output_file=os.path.join(output_dir, "step_1_Recommend_search_queries.json"),
-            )
+            if errors["search_recommendation_task"]:
+                progress_container.error(f"Search Recommendation Agent failed: {errors['search_recommendation_task']}")
+                if debug_mode:
+                    st.error(f"Search Recommendation Agent failed: {errors['search_recommendation_task']}")
+            else:
+                progress_container.success("Search Recommendation Agent completed!")
+                
+                # Agent 2: Search Engine Agent
+                progress_container.info("Running Search Engine Agent...")
+                results["search_engine_task"], errors["search_engine_task"] = run_search_engine_agent(
+                    score_threshold, output_dir, basic_llm
+                )
+                
+                if errors["search_engine_task"]:
+                    progress_container.error(f"Search Engine Agent failed: {errors['search_engine_task']}")
+                    if debug_mode:
+                        st.error(f"Search Engine Agent failed: {errors['search_engine_task']}")
+                else:
+                    progress_container.success("Search Engine Agent completed!")
+                    
+                    # Agent 3: Web Scraper Agent
+                    progress_container.info("Running Web Scraper Agent...")
+                    results["search_scrap_task"], errors["search_scrap_task"] = run_web_scraper_agent(
+                        output_dir, basic_llm
+                    )
+                    
+                    if errors["search_scrap_task"]:
+                        progress_container.error(f"Web Scraper Agent failed: {errors['search_scrap_task']}")
+                        if debug_mode:
+                            st.error(f"Web Scraper Agent failed: {errors['search_scrap_task']}")
+                    else:
+                        progress_container.success("Web Scraper Agent completed!")
+                        
+                        # Agent 4: Skills Summarizer Agent
+                        progress_container.info("Running Skills Summarizer Agent...")
+                        results["search_summarize_task"], errors["search_summarize_task"] = run_skills_summarizer_agent(
+                            score_threshold, output_dir, basic_llm
+                        )
+                        
+                        if errors["search_summarize_task"]:
+                            progress_container.error(f"Skills Summarizer Agent failed: {errors['search_summarize_task']}")
+                            if debug_mode:
+                                st.error(f"Skills Summarizer Agent failed: {errors['search_summarize_task']}")
+                        else:
+                            progress_container.success("Skills Summarizer Agent completed!")
             
-            # Initialize Search Engine Agent
-            progress_container.info("Initializing Search Engine Agent...")
-            search_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+            # Store the results in session state
+            st.session_state.results = results
+            st.session_state.show_results = True
+            progress_container.success("Job search process completed!")
             
-            @tool
-            def search_engine_tool(query: str):
-                """Useful for search-based queries. Use this to find current information about any query related pages using a search engine"""
-                return search_client.search(query)
-            
-            search_engine_agent = Agent(
-                role="search engine agent",
-                goal="To search on job based on suggested search queries",
-                backstory="This agent is designed to help in finding jobs by using the suggested search queries",
-                llm=basic_llm,
-                verbose=True,
-                tools=[search_engine_tool]
-            )
-            
-            search_engine_task = Task(
-                description="\n".join([
-                    "search for jobs based on the suggested search queries",
+        except Exception as e:
+            error_msg = f"An error occurred: {str(e)}"
+            progress_container.error(error_msg)
+            if debug_mode:
+                st.error(error_msg)
+                st.code(traceback.format_exc())
+        
+        st.session_state.running = False
+        st.experimental_rerun()              "search for jobs based on the suggested search queries",
                     "you have to collect results from the suggested search queries",
                     "ignore any results that are not related to the job",
                     f"Ignore any search results with confidence score less than ({score_threshold})",
