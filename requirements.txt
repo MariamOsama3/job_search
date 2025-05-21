@@ -1,12 +1,6 @@
-# Core app dependencies
 streamlit
-crewai[tools]~=0.11.2
-openai
+crewai[pydantic]
 google-generativeai
 tavily-python
-scrapegraphai
-
-# Optional but useful extras
-python-dotenv
-requests
-beautifulsoup4
+scrapegraph-py
+pydantic
