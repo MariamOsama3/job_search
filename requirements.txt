@@ -1,6 +1,6 @@
-streamlit
-crewai[pydantic]
-google-generativeai
-tavily-python
-scrapegraph-py
-pydantic
+streamlit>=1.32.0
+crewai[pydantic]>=0.28.8
+google-generativeai>=0.3.2
+tavily-python>=0.3.2
+scrapegraph-py>=0.1.0
+pydantic>=2.6.4
