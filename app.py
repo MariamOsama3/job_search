@@ -1,94 +1,45 @@
-import os
+# app.py
+
 import streamlit as st
-import google.generativeai as genai
-from agents import (
-    search_engine_agent, search_engine_task,
-    scrap_agent, scrap_task,
-    summarize_agent, summarize_task,
-    skills_agent, skills_task,
-)
+import os
+from agents import create_llm, create_agents, create_tasks, run_crew
 
-# --------------------
-# Page Setup
-# --------------------
-st.set_page_config(page_title="Job Search AI", layout="wide")
+st.set_page_config(page_title="AI Job Search Agents", layout="wide")
 
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
+st.title("🤖 AI-Powered Job Search Assistant")
 
-page = st.sidebar.selectbox(
-    "Navigation",
-    ["1. API Key", "2. Job Query", "3. Results"]
-)
+with st.sidebar:
+    st.header("🔐 API Configuration")
+    gemini_key = st.text_input("Gemini API Key", type="password")
+    if gemini_key:
+        os.environ["GEMINI_API_KEY"] = gemini_key
 
-# --------------------
-# Page 1: API Key Input
-# --------------------
-if page == "1. API Key":
-    st.title("🔑 Enter Your API Key")
-    key = st.text_input("Gemini / OpenAI API Key", type="password")
-    if st.button("Save Key"):
-        st.session_state.api_key = key
-        st.success("API key saved!")
+    st.markdown("---")
+    st.info("Enter your prompt below and run the agents.")
 
-# --------------------
-# Page 2: Job Query
-# --------------------
-elif page == "2. Job Query":
-    st.title("🔍 Select Job Search Term")
-    query = st.text_input("Job title or keywords to search for:")
-    if st.button("Run Search"):
-        if not st.session_state.api_key:
-            st.error("Please enter and save your API key on page 1.")
-        elif not query:
-            st.error("Please enter a job query to search.")
-        else:
-            # Configure API Key for agents
-            os.environ["GEMINI_API_KEY"] = st.session_state.api_key
-            genai.configure(api_key=st.session_state.api_key)
+prompt = st.text_area("✍️ Enter your job search context, resume, or interests:", height=200)
 
-            st.session_state.query = query
-            # Agent pipeline
-            st.session_state.refined_queries = search_engine_agent.run(
-                task=search_engine_task,
-                query=query
-            )
-            st.session_state.listings = scrap_agent.run(
-                task=scrap_task,
-                queries=st.session_state.refined_queries
-            )
-            st.session_state.summaries = summarize_agent.run(
-                task=summarize_task,
-                listings=st.session_state.listings
-            )
-            st.session_state.skills = skills_agent.run(
-                task=skills_task,
-                summaries=st.session_state.summaries
-            )
-            st.success("Search completed! Go to '3. Results' to view.")
+if st.button("🚀 Run Agents") and gemini_key and prompt:
+    with st.spinner("Running agents..."):
+        llm = create_llm()
+        agent1, agent2, agent3 = create_agents(llm)
+        tasks = create_tasks(agent1, agent2, agent3, prompt)
+        result = run_crew(tasks)
 
-# --------------------
-# Page 3: Results
-# --------------------
-elif page == "3. Results":
-    st.title("📋 Search Results")
-    if not st.session_state.get("refined_queries"):
-        st.info("No results yet. Run a search on page 2.")
-    else:
-        # 1) Show refined queries
-        st.header("1. Search Queries Generated")
-        for q in st.session_state.refined_queries:
-            st.write(f"- **Query:** {q}")
-        # 2) Show job listings with title and URL
-        st.header("2. Job Listings Found")
-        for job in st.session_state.listings:
-            st.subheader(job['title'])
-            st.write(f"🔗 [Job Link]({job['url']})")
-        # 3) Show descriptions
-        st.header("3. Job Descriptions")
-        for idx, desc in enumerate(st.session_state.summaries):
-            st.markdown(f"**{idx+1}.** {desc}")
-        # 4) Show required skills
-        st.header("4. Required Skills")
-        for job_skills in st.session_state.skills:
-            st.markdown("- " + ", ".join(job_skills))
+    st.success("✅ Agents completed their tasks!")
+
+    # Show results nicely
+    col1, col2, col3 = st.columns(3)
+    col1.subheader(agent1.role)
+    col1.write(tasks[0].output)
+
+    col2.subheader(agent2.role)
+    col2.write(tasks[1].output)
+
+    col3.subheader(agent3.role)
+    col3.write(tasks[2].output)
+
+elif not gemini_key:
+    st.warning("Please enter your Gemini API Key in the sidebar.")
+elif not prompt:
+    st.info("Enter your job-related query to begin.")
