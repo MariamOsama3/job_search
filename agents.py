@@ -1,53 +1,68 @@
-from crewai import Agent, Task, LLM
-from llm_setup import basic_llm
-from tools import search_engin_tool, scrap_tool
+# agents.py
 
-# Agent 1: Search Engine Agent
-search_engine_agent = Agent(
-    role="search engine agent",
-    goal="To search on job baased on suggested search queries",
-    backstory="that egint desingned to help in finding jobs by using the suggested search queries",
-    llm=basic_llm,
-    verbose=True,
-    tools=[search_engin_tool]
-)
-search_engine_task = Task(
-    description="search for jobs on websites using queries provided"
-)
+import os
+from crewai import Crew, Agent, Task, Process, LLM
 
-# Agent 2: Scrap Agent
-scrap_agent = Agent(
-    role="scrap agent",
-    goal="To scrape job listing URLs and titles",
-    backstory="This agent scrapes job listing pages",
-    llm=basic_llm,
-    verbose=True,
-    tools=[scrap_tool]
-)
-scrap_task = Task(
-    description="retrieve URLs and titles from job listing pages"
-)
+def create_llm():
+    return LLM(
+        model="gemini/gemini-1.5-flash",
+        temperature=0.7
+    )
 
-# Agent 3: Summarization Agent
-summarize_agent = Agent(
-    role="summarization agent",
-    goal="To summarize job descriptions",
-    backstory="This agent reads job descriptions and summarizes key points",
-    llm=basic_llm,
-    verbose=True
-)
-summarize_task = Task(
-    description="read a job description and summarize its main responsibilities and requirements"
-)
+def create_agents(llm):
+    # Example agent definitions
+    agent_1 = Agent(
+        role="Job Market Analyst",
+        goal="Analyze current job market trends",
+        backstory="Expert in labor economics and market trends.",
+        llm=llm,
+        verbose=True
+    )
 
-# Agent 4: Skills Extraction Agent
-skills_agent = Agent(
-    role="skills agent",
-    goal="To extract required skills from descriptions",
-    backstory="This agent extracts a list of required skills from job summaries",
-    llm=basic_llm,
-    verbose=True
-)
-skills_task = Task(
-    description="analyze the job summary and output a list of required skills"
-)
+    agent_2 = Agent(
+        role="Resume Evaluator",
+        goal="Assess and improve user resume alignment",
+        backstory="Experienced career coach and resume analyst.",
+        llm=llm,
+        verbose=True
+    )
+
+    agent_3 = Agent(
+        role="Job Recommender",
+        goal="Recommend best-fit jobs",
+        backstory="HR specialist with access to job boards.",
+        llm=llm,
+        verbose=True
+    )
+
+    return agent_1, agent_2, agent_3
+
+def create_tasks(agent_1, agent_2, agent_3, user_prompt):
+    task_1 = Task(
+        description=f"Analyze job market based on: {user_prompt}",
+        agent=agent_1,
+        expected_output="Detailed report on job trends."
+    )
+
+    task_2 = Task(
+        description=f"Evaluate resume and suggest improvements: {user_prompt}",
+        agent=agent_2,
+        expected_output="Resume enhancement suggestions."
+    )
+
+    task_3 = Task(
+        description=f"Find best-fit jobs for: {user_prompt}",
+        agent=agent_3,
+        expected_output="List of job recommendations."
+    )
+
+    return [task_1, task_2, task_3]
+
+def run_crew(tasks):
+    crew = Crew(
+        agents=[task.agent for task in tasks],
+        tasks=tasks,
+        process=Process.sequential
+    )
+    result = crew.kickoff()
+    return result
