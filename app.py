@@ -77,6 +77,15 @@ The process involves four specialized agents working together:
 4. **Skills Summarizer Agent**: Summarizes the skills required for the job positions
 """)
 
+# Debug mode toggle
+with st.sidebar:
+    st.header("Debug Options")
+    debug_mode = st.checkbox("Enable Debug Mode", value=False)
+    
+    if debug_mode:
+        st.write("Python version:", sys.version)
+        st.write("Current directory:", os.getcwd())
+
 # Initialize session state variables if they don't exist
 if "api_keys_set" not in st.session_state:
     st.session_state.api_keys_set = False
