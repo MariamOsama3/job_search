@@ -18,7 +18,7 @@ output_dir = "./ai-agent-output"
 os.makedirs(output_dir, exist_ok=True)
 
 # environment
-os.environ["GEMINI_API_KEY"] = "AI**************************************"
+os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 
 # general setup for the llm model
 basic_llm = LLM(
@@ -59,7 +59,7 @@ search_recommendation_task = Task(
 )
 
 # Agent 2
-search_clint = TavilyClient(api_key="tvly**************************************")
+search_clint = TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
 
 class SingleSearchResult(BaseModel):
     title: str
@@ -101,7 +101,7 @@ search_engine_task = Task(
 )
 
 # Agent 3
-scrape_client = Client(api_key="sgai********************************")
+scrape_client = Client(api_key=st.secrets["SCRAPEGRAPH_API_KEY"])
 
 class ProductSpec(BaseModel):
     specification_name: str
