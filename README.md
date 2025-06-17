@@ -3,7 +3,7 @@
 **Your AI-Powered Career Wingman**  
 *Never job hunt alone again! Meet your AI agents ready to scour the web for perfect opportunities*
 
-[[![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://yourapp.streamlit.app)
+[[![Streamlit]( https://lnkd.in/ddCQWzxq)
 ](https://jobsearch-d7ebnc7cfzuttqkfctdxoc.streamlit.app/)
 
 <div align="center">
